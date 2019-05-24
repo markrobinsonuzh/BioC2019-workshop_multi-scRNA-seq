@@ -1,0 +1,38 @@
+Package: muscWorkshop
+Type: Package
+Title: Analysis of multi-sample multi-group scRNA-seq data
+Version: 0.0.1
+Description: ...
+Authors@R: c(
+	person("Helena L.", "Crowell", email="helena.crowell@uzh.ch", role=c("aut", "cre")),
+	person("Charlotte", "Soneson", role="aut"),
+	person("Pierre-Luc", "Germain", role="aut"),
+	person("Mark D.", "Robinson", role=c("aut", "fnd")))
+Maintainer: Helena L. Crowell <helena.crowell@uzh.ch>
+Depends: 
+	R (>= 3.6.0),
+	SingleCellExperiment
+Imports: 
+	ComplexHeatmap,
+	cowplot,
+	data.table,
+	dplyr,
+	edgeR,
+	ExperimentHub,
+	ggplot2,
+	limma,
+	magrittr, 
+	Matrix, 
+	purrr, 
+	S4Vectors, 
+	scales,
+	scater, 
+	tibble
+Suggests:
+	BiocStyle,
+	knitr,
+	rmarkdown
+VignetteBuilder: knitr
+License: file LICENSE
+Encoding: UTF-8
+URL: https://github.com/HelenaLC/BioC2019-workshop_multi-scRNA-seq
