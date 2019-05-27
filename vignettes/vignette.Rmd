@@ -1,5 +1,5 @@
 ---
-title: "Analysis of multi-sample multi-group scRNA-seq data"
+title: "Bioconductor 5xx: <br> Analysis of multi-sample <br> multi-group scRNA-seq data"
 author:
 - name: Helena L Crowell
   affiliation:
@@ -19,23 +19,28 @@ author:
   - *IMLS
   - *SIB
 abstract: >
-  Single-cell RNA sequencing (scRNA-seq) has quickly become an empowering technology to characterize the transcriptomes of individual cells. A primary task in the analysis of scRNA-seq data is differential expression analysis (DE). Most early analyses of differential expression (DE) in scRNA-seq data have aimed at identifying differences between cell types, and thus are focused on finding markers for cell sub-populations (experimental units are cells). <br>
-  There is now an emergence of multi-sample multi-condition scRNA-seq datasets where the goal is to make sample-level inferences (experimental units are samples), with 100s to 1000s of cells measured per replicate. To tackle such complex experimental designs, so-called differential state (DS) analysis follows cell types across a set of samples (e.g., individuals) and experimental conditions (e.g., treatments), in order to identify cell-type specific responses, i.e., changes in cell state. DS analysis: i) should be able to detect expressed changes that affect only a single cell type, a subset of cell types, or even a subset of cells within a cell type; and, ii) is orthogonal to clustering or cell type assignment (i.e., genes typically associated with cell types are not of direct interest for DS). Furthermore, cell-type level DE analysis is arguably more interpretable and biologically meaningful. 
+  text
 package: "`r BiocStyle::pkg_ver('muscWorkshop')`"
 date: "Last modified: `r format(Sys.Date(), '%B %d, %Y')`"
 output: 
-  BiocStyle::html_document:
-    code_folding: show
+  BiocStyle::html_document
 vignette: >
-  %\VignetteIndexEntry{Untitled}
+  %\VignetteIndexEntry{"Bioconductor 5xx: Analysis of multi-sample multi-group scRNA-seq data"}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}  
-bibliography: refs.bib
+bibliography: "`r file.path(system.file('vignettes', package = 'muscWorkshop'), 'refs.bib')`"
 ---
 
-```{r load-pkgs, message = FALSE, warning = FALSE}
-library(ComplexHeatmap)
+```{r eval = FALSE, warning = FALSE, message = FALSE}
+knitr::opts_chunk$set(autodep = TRUE, cache = TRUE)
+```
+
+```{r echo = TRUE, message = FALSE, warning = FALSE}
 library(cowplot)
+```
+
+```{r message = FALSE, warning = FALSE}
+library(ComplexHeatmap)
 library(data.table)
 library(dplyr)
 library(edgeR)
@@ -45,46 +50,62 @@ library(limma)
 library(magrittr)
 library(Matrix)
 library(purrr)
-library(S4Vectors)
 library(scales)
 library(scater)
 library(SingleCellExperiment)
+library(S4Vectors)
 library(tibble)
 ```
 
-# Data description
+# Introduction
 
-@Kang2018-demuxlet
+## What is DS analysis?
 
-The `muscData` package contains a set of publicly available scRNA-seq datasets with complex experimental designs, i.e., datasets that contain multiple samples (e.g., individuals) measured across multiple experimental conditions (e.g., treatments), formatted into SingleCellExperiment (SCE) Bioconductor objects. Data objects are hosted through Bioconductor’s `ExperimentHub` web resource.
+A fundamental task in the analysis of single-cell RNA-sequencing (scRNA-seq) data is the identification of systematic subpopulation-specific transcriptional changes across experimental conditions [@Stegle2015]. Such analyses are a critical step in the understanding of molecular responses, and have applications in development, in perturbation studies or in disease.  
+Most of the current scRNA-seq DE methods are designed to test one set of cells against another (or more generally, multiple sets together), and can be used to compare cell clusters (e.g., for identifying marker genes) or across conditions (cells from one condition versus another) [@Soneson2018]. In such statistical models, the cells are the experimental units and thus represent the population that inferences will extrapolate to.
 
-`Kang18_8vs8` contains droplet-based scRNA-seq PBMC data from 8 Lupus patients before and after 6h-treatment with INF-beta. The original data set is deposited under Gene Expression Ombnibus (GEO) accession [GSE96583](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE96583). Here, we will load the data as a `SingleCellExperiment` (SCE) from the `muscData` `ExperimentHub` package. 
+Using established terminology, we refer to cell *identity* as the combination of cell *type*, a stable molecular signature, and cell *state*, a transient snapshot of a cell's molecular events [@Wagner2016; @Trapnell2015]. This classification is inherently arbitrary, but still provides a basis for biological interpretation and a framework for discovering interesting expression patterns from scRNA-seq datasets. For example, T cells could be defined as a single (albeit diverse) cell type or could be divided into discrete subtypes, if relevant information to categorize each cell at this level were available. In either case, the framework presented here would be able to focus on the cell type of interest and look for changes (in expression) across samples.  
+Given the emergence of multi-sample multi-group scRNA-seq datasets, the goal becomes making sample-level inferences (i.e., experimental units are samples). Thus, differential state (DS) analysis is defined as following a given cell type across a set of samples (e.g., individuals) and experimental conditions (e.g., treatments), in order to identify cell-type-specific responses, i.e., changes in cell state. DS analysis: i) should be able to detect diluted changes that only affect a single cell type, a subset of cell types or even a subset of a single subpopulation; and, ii) is intended to be orthogonal to clustering or cell type assignment. 
 
-We use `ExperimentHub()` to obtain information about all currently available data records, `query()` to search the hub for data available through the `muscData` package. We can then retrieve the data of interest via `[[` and the corresponding accession ID.
+## Starting point
 
-We first initialize a Hub instance to search for and load available data with the `ExperimentHub` function, and store the complete list of records in a variable `eh.` Using `query`, we then identify any records that match our keyword(s) of interest, as well as their accession IDs (EH1234).
+The starting point for a DS analysis is a (sparse) matrix of gene expression, either as counts or some kind of normalized data, where rows = genes and columns = cells. Each cell additionally has a cluster (subpopulation) label as well as a sample label; metadata should accompany the list of samples, such that they can be organized into comparable groups with sample-level replicates (e.g., via a design matrix). 
 
-```{r load-eh, cache = TRUE, message = FALSE}
+The approach presented here is modular and thus the type label could originate from an earlier step in the analysis, such as clustering [@Duo2018; @Freytag2018], perhaps after integration  [@Butler2018; @Stuart2018] or after labeling of clusters [@Diaz-Mejia2019] or after cell-level type assignment [@Zhang2019]. Although we have pipelines for these various entry points, the specific details and suitability of all these pre-processing steps needs careful exploration and are beyond the scope of this workflow.
+
+# Getting started
+
+## Data description
+
+To illustrate a standard DS analysis workflow, we will use @Kang2018-demuxlet's droplet-based scRNA-seq data of PBMCs cells from 8 lupus patients measured before and after 6h-treatment with INF-$\beta$ (16 samples in total). The original dataset is deposited under Gene Expression Ombnibus (GEO) accession [GSE96583](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE96583), and has been made available via Bioconductor’s `ExperimentHub` web resource as a SingleCellExperiment (SCE) object that contains unfiltered raw counts, and any gene and cell metadata available from the original data source.
+
+## Loading the data
+
+We first initialize a Hub instance to search for and load available data with the `ExperimentHub` function, and store the complete list of records in the variable `eh`. Using `query`, we then retrieve any records that match our keyword(s) of interest, as well as their accession IDs (EH1234).
+
+```{r eh, cache = TRUE, message = FALSE}
 eh <- ExperimentHub()
 query(eh, "Kang")
 ```
 
 Finally, we load the data of interest into R via `[[` and the corresponding accession ID:
 
-```{r load-data, message = FALSE}
+```{r sce, message = FALSE}
 (sce <- eh[["EH2259"]])
 ```
 
-Before proceeding with basic preprocessing and filtering steps, we drop any non-singlet cells as well as cells that have not been assigned a cluster ID:
+## Data preparation
+
+Before proceeding with basic preprocessing and filtering steps, we drop non-singlet cells as well as cells that have not been assigned a cluster ID:
 
 ```{r}
 sce <- sce[, sce$multiplets == "singlet" & !is.na(sce$cell)]
 dim(sce)
 ```
 
-For simplicity, we will retain only cell-metadata columns that are relevant to our analysis (and use intuitive names for these):
+For simplicity, we will further retain only cell-metadata columns that are relevant to our analysis (and use intuitive names for these):
 
-```{r}
+```{r cd}
 colData(sce) %>% 
     as.data.frame %>% 
     transmute(
@@ -98,85 +119,121 @@ colData(sce) %>%
 head(colData(sce))
 ```
 
+For consistency and easy accession throughout this workflow, we will store cluster and sample IDs, as well as the number of clusters and samples:
+
+```{r ids}
+nk <- length(kids <- set_names(levels(sce$cluster_id)))
+ns <- length(sids <- set_names(levels(sce$sample_id)))
+```
+
 Finally, we compile a table that summarizes the experimental design:
 
-```{r}
-m <- match(levels(sce$sample_id), sce$sample_id)
+```{r ei}
+m <- match(sids, sce$sample_id)
 n_cells <- as.numeric(table(sce$sample_id))
 (ei <- data.frame(colData(sce)[m, ], 
     n_cells, row.names = NULL) %>% 
     select(-"cluster_id"))
 ```
 
-For consistency and easy accession throughout this workflow, we will store cluster and sample IDs, as well as the number of clusters and samples:
-
-```{r}
-nk <- length(kids <- set_names(levels(sce$cluster_id)))
-ns <- length(sids <- set_names(levels(sce$sample_id)))
-```
-
 # Preprocessing
 
-We will check the dimension of our SCE at each filtering step.
+The `r Biocpkg("scater")` package [@McCarthy2017-scater] provides a variey of tools for preprocessing and quality control of single-cell transcriptomic data. For completeness, we will apply some minimal filtering steps to
 
-```{r prepo, message = FALSE}
-# get mitochondrial genes
-(mito_gs <- grep("^MT-", rownames(sce), value = TRUE))
-isSpike(sce, "MT") <- mito_gs
+- remove undetected genes
+- remove cells with very few or many detected genes
+- remove very lowly expressed genes
+- compute normalized expression values for visualization
 
+For more thorough preprocessing, we refer to the [Quality control with *scater*](https://bioconductor.org/packages/release/bioc/vignettes/scater/inst/doc/vignette-qc.html) vignette.
+
+```{r prepro}
 # remove undetected genes
 sce[rowSums(counts(sce) > 0) > 0, ]
 dim(sce)
+```
 
+We use `calculateQCMetrics` to compute various quality control metrics for each cell and gene, stored in the `colData` and `rowData`, respectively. 
+
+```{r qc}
 # calculate quality control (QC) metrics
 sce <- calculateQCMetrics(sce)
+```
 
+```{r}
 # get cells w/ few/many detected genes
 sce$is_outlier <- isOutlier(
     metric = sce$total_features_by_counts,
     nmads = 2, type = "both", log = TRUE)
 
-as.data.frame(colData(sce)) %>% 
-    ggplot(aes(x = total_features_by_counts, alpha = is_outlier)) +
-    scale_alpha_manual(values = c("TRUE" = 0.2, "FALSE" = 0.8)) +
-    geom_histogram(bins = 100) + theme_bw()
-
 # remove outlier cells
 sce <- sce[, !sce$is_outlier]
 dim(sce)
+
+# remove lowly expressed genes & normalize
+sce <- sce[rowSums(counts(sce) > 1) >= 10, ]
+dim(sce)
 ```
 
-# Aggregation of single-cell to pseudo-bulk data {#sec-agg}
+We use `normalize` to calculate log$_2$-transformed normalized expression values by dividing each count by its size factor, adding a pseudo-count of 1, and log-transforming[^1].  
+Alternatively, expression values could be obtained via `vst` (variance stabilizing transformation) from the `r CRANpkg("sctransform")` packages [@Hafemeister2019-vst], which returns Pearson residuals from a regularized negative binomial regression model that can be interpreted as normalized expression values.  
 
-In order to leverage existing robust bulk RNA-seq DE frameworks, such as `r Biocpkg("edgeR")` and `r Biocpkg("limma")`, we first aggregate measurements for each cluster at the sample level to obtain pseudobulk data. While in principle various combinations of input data (raw/(log-)normalized counts, CPM ect.) and summary statistics (sum, mean, median) could be applied, we here default to the sum of counts:
+[^1]: Note that, in this workflow, expression values are used for visualization only, and that differential analysis is performed on cluster-sample-level aggregates; see section \@ref(agg).
 
-```{r pb}
+```{r norm}
+sizeFactors(sce) <- librarySizeFactors(sce)
+sce <- normalize(sce)
+assayNames(sce)
+range(logcounts(sce))
+```
+
+# DS analysis
+
+## Aggregation of single-cell to pseudo-bulk data {#agg}
+
+We considered two conceptually distinct representations of the data for each cluster (type), cell-level or sample-level, and from these, made sample-level inferences. On cell-level data, we applied: i) mixed models (MM) with a fixed effect for the experimental condition and random effects for within-sample and between-sample variability; and, ii) an approach comparing distributions (Anderson-Darling test)... although these methods were not specifically intended for the across-sample situation. Alternatively, by first aggregating measurements for each subpopulation (for each sample) to obtain pseudobulk data, we leveraged existing bulk RNA-seq analysis frameworks and compared several strategies of aggregation. 
+
+In order to leverage existing robust bulk RNA-seq DE frameworks, such as `r Biocpkg("edgeR")` and `r Biocpkg("limma")`, we first aggregate measurements for each cluster at the sample level to obtain pseudobulk data. While in principle various combinations of input data (raw/(log-)normalized counts, CPM ect.) and summary statistics (sum, mean, median) could be applied, we here default to the sum of raw counts:
+
+```{r echo = FALSE, out.width = "80%", fig.cap = "Aggregation of single-cell to pseudo-bulk data. Cell-level measurements for each subpopulation (cluster) and sample are aggregated to obtain pseudo-bulk data."}
+knitr::include_graphics(file.path(system.file("vignettes", package = "muscWorkshop"), "sc-to-pb.png"))
+```
+
+To compute cluster-sample-level aggregates, we first split the character vector of cells (`colnames(sce`) by both `cluster_id` and `sample_id`[^2]:
+
+[^2]: `sorted = TRUE` in `split()` assures that the order of clusters and samples is consistent for latter column-binding. 
+
+```{r split-cells}
 # split cells by cluster-sample
 cs_by_ks <- as.data.frame(colData(sce)) %>% 
-    rownames_to_column("cell") %>% setDT %>% 
-    split(by = c("cluster_id", "sample_id"), 
+    rownames_to_column("cell") %>% 
+    setDT %>% split(by = c("cluster_id", "sample_id"),
         sorted = TRUE, keep.by = FALSE, flatten = FALSE) %>% 
     map_depth(2, "cell")
-
-# compute pseudobulks for ea. cluster-sample
-pb <- map_depth(cs_by_ks, 2, function(cs) 
-    rowSums(counts(sce[, cs])))
-
-# column-bind samples
-pb <- map(pb, data.frame)
 ```
 
-Through the code snipped above we obtain a list of length #(clusters) (`nk`), where each list element contains a `data.frame` of pseudo-bulk counts with rows = genes and columns = samples. For a more elegant show-method and easier data accession, we create a SCE where each assay sheet corresponds to one cluster:
+`cs_by_ks` is a nested list of depth 2 where the 1st level = clusters and the 2nd level = samples. For example, we could retrieve the set of cells assigned to the "B cells" cluster and sample "ctrl101" via `cs_by_ks[["B cells"]][[ctrl101]]`.  
+Using `map_depth(.., depth = 2)`, we loop through all cluster-sample instances and compute, for each gene, the sum of counts across the respective set of cells:
+
+```{r pb-counts}
+# for ea. cluster-sample..
+pb <- map_depth(cs_by_ks, 2, function(cs) 
+    rowSums(counts(sce[, cs]))) %>% # ..compute pseudobulks
+    map(data.frame)                 # column-bind samples
+```
+
+From the code snippet above, we obtain a list of length `nk`, where each element contains a `data.frame` of pseudobulk counts with rows = genes and columns = samples. For a more elegant show-method and easier data accession, we create a SCE where each assay sheet corresponds to one cluster:
 
 ```{r}
+# construct SCE of pseudo-bulk counts
+# (assays = clusters, rows = genes, columns = samples)
 (pb <- SingleCellExperiment(assays = pb))
 ```
 
-## Pseudobulk-level MDS plot
+### Pseudobulk-level MDS plot
 
-Prior to conducting any formal testing, we can compute a multi-dimensional scaling (MDS) plot of aggregated signal to explore overall sample similarities. Ideally, such a represenation of the data should separate both clusters and groups from one another. Vice versa, samples from the same cluster/group should fall close to each other.
-
-In our MDS plot on pseudobulk counts (Fig. \@ref(fig:mds)), we can appreciate that the horizontal dimension clearly separates cell-populations (clusters), while control and stimulated samples (groups) are separated vertically.
+Prior to conducting any formal testing, we can compute a multi-dimensional scaling (MDS) plot of aggregated signal to explore overall sample similarities. Ideally, such a represenation of the data should separate both clusters and groups from one another. Vice versa, samples from the same cluster/group should fall close to each other.  
+In our MDS plot on pseudobulk counts (Fig. \@ref(fig:mds)), we can appreciate that the horizontal dimension (MDS dim. 1) clearly separates cell-populations (clusters), while control and stimulated samples (groups) are separated vertically (MDS dim. 2).
 
 ```{r mds, message = FALSE, fig.cap = "Pseudobulk-level MDS plot. Each point represents one cluster-sample instance; points are colored by cluster ID and shaped by group ID."}
 # compute MDS coordinates
@@ -198,19 +255,19 @@ ggplot(df, aes(x, y, col = cluster_id, shape = group_id)) +
     theme_bw() + theme(panel.grid.minor = element_blank())
 ```
 
-# DS analysis
-
 ## Cluster-sample cell-counts
 
-While DE analysis is typically used to compare cell-types across conditions, and may struggle with rare sub-populations, DS analysis compares cluster-sample instances that are likely to be much smaller. Thus, DS analysis may only be applicable to more prominent populations. It is thus recommended to check cluster-sample cell-counts, and to possibly exclude small instances from downstream analyses. 
-
-In our example, we might consider omitting DS analysis of the Megakaryocytes and Dendritic cells clusters, as these contain less than 30 cells across almost all samples.
+While DE analysis is typically used to compare cell-types across conditions, and may struggle with rare subpopulations, DS analysis compares cluster-sample instances that are likely to be much smaller. Thus, DS analysis may only be applicable to more prominent populations. It is therefore recommended to check cluster-sample cell-counts, and to possibly exclude small instances from downstream analyses. In our example, we might consider, for instance, omitting DS analysis on the "Megakaryocytes" and "Dendritic cells" clusters, as these contain less than 30 cells across almost all samples.
 
 ```{r}
 table(sce$cluster_id, sce$sample_id)
 ```
 
-## Performing cluster-level DE analysis
+## Testing of DS {#DS}
+
+To calculate differential tests, we require a matrix describing the experimental design, and a contrast matrix specifying the comparison of interest, i.e., the combination of model parameters assumed to equal zero under the null hypothesis. 
+
+Design and contrast matrices of appropriate format can be created using the `model.matrix` (`r CRANpkg("stats")` package) and `makeContrast` function (`r Biocpkg("limma")` package), respectively. For clarity, we also set the dimension names of the design matrix (though this is not required by `edgeR`).
 
 ```{r ds, message = FALSE}
 # construct design & contrast matrix
@@ -235,15 +292,43 @@ res <- lapply(kids, function(k) {
 
 ## Results filtering & overview
 
-To get a general overview of the differential testing results, we first filter them to retain hits with $\text{FDR}<5\%$ and $~|~logFC~|~>1$, and count the number of differential findings by cluster. Finally, we view the top hits (lowest adj. p-value) in each cluster.
+To get a general overview of the differential testing results, we first filter them to retain hits with $\text{FDR}<5\%$ and $~|~logFC~|~>1$, and count the number of differential findings by cluster.
 
 ```{r}
-res <- lapply(res, dplyr::filter, abs(logFC) > 1, p_adj < 0.05)
+# filter FDR < 0.05, |logFC| > 1 & sort by FDR
+res <- lapply(res, dplyr::filter, p_adj < 0.05, abs(logFC) > 1)
 res <- lapply(res, dplyr::arrange, p_adj)
 
 # nb. & % of DE genes per cluster
 n_de <- vapply(res, nrow, numeric(1))
 cbind(n_de, p_gs = n_de / nrow(sce) * 100)
+```
+
+## Between-cluster concordance
+
+DS analysis aims at identifying cell-type-specific changes (in expression) across conditions. In this setting, key questions of interest arise, e.g., which genes are DE in only a single (or very few) clusters? How many DE genes are shared between clusters? In summary, what is the general concordance in differential findings between clusters?  
+
+To gain an impression of the between-cluster (dis-)agreement on DE genes, we compute, for each pair of clusters `k1` and `k2`, the fraction of genes that are differential in both clusters, `k1` and `k2`:
+
+```{r between-cluster-concordance}
+combis <- expand.grid(kids, kids)
+df <- apply(combis, 1, function(ks) {     # for ea. combination of clusters..
+    gs_k1 <- res[[ks[1]]]$gene            # get cluster 1 DE genes
+    gs_k2 <- res[[ks[2]]]$gene            # get cluster 2 DE genes
+    sum(gs_k1 %in% gs_k2) / length(gs_k1) # calculate overlap
+}) %>% data.frame(overlap = ., combis)
+```
+
+From the heatmap visualization in Fig. \@ref(fig:between-cluster-concordance-heatmap), we can deduce varied but overall high concordance between clusters. For example, $83\%$ of DE genes in the "CD8 T cells" cluster were also found to be differential among "CD4 T cells"; $>60\%$ of "Megakaryocytes" hits were DE across all clusters; and $<=40\%$ of "CD14+ Monocytes" findings were retrieved by any other cluster.
+
+```{r between-cluster-concordance-heatmap, fig.cap = "Between-cluster concordance. Coloring corresponds to the proportion of DE genes in cluster Y that are differential in cluster X."}
+ggplot(df, aes(x = Var2, y = Var1, fill = overlap)) + 
+    geom_tile(size = 0.5, col = "white") + 
+    geom_text(size = 3, aes(label = format(overlap, digits = 1))) +
+    scale_fill_distiller(palette = "RdYlBu") +
+    scale_y_discrete(limits = rev(kids)) + 
+    labs(x = NULL, y = NULL) + coord_fixed() + theme_minimal() + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
 # Visualization
@@ -252,27 +337,43 @@ cbind(n_de, p_gs = n_de / nrow(sce) * 100)
 
 One of the most popular plots for representing single-cell data are t-SNE plots, where each cell is represented in a lower, usually two-dimensional, space computed using t-stochastic neighbor embedding (t-SNE).
 
-Dimensionaly reductions available within our SCE can be accessed via `reducedDims` from the `r Biocpkg("scater")` package, and visualized using `plotReducedDim`. For our dataset, the t-SNE (Fig. \@ref(fig:tsne)) shows that cell-populations are well-separated from one another. INF-$\beta$ stimulation manifests as a severe shift in the t-SNE projection of cells, indicating widespread, genome-scale transcriptiontal changes. 
+Dimensionality reductions available within our SCE can be accessed via `reducedDims` from the `r Biocpkg("scater")` package, and visualized using `plotReducedDim`. For our dataset, the t-SNE colored by cluster IDs (Fig. \@ref(fig:tsne)a) shows that cell-populations are well-separated from one another. INF-$\beta$ stimulation manifests as a severe shift in the t-SNE projection of cells (Fig. \@ref(fig:tsne)b), indicating widespread, genome-scale transcriptiontal changes. 
 
-```{r tsne, fig.wide = TRUE, fig.cap = "t-SNE. Cells are colored by cluster ID and shaped by group ID."}
+```{r eval = FALSE}
+# t-SNE colored by cluster ID
+plotReducedDim(sce, use_dimred = "TSNE", colour_by = "cluster_id")
+
+# t-SNE colored by group ID
+plotReducedDim(sce, use_dimred = "TSNE", colour_by = "group_id")
+```
+
+```{r tsne, echo = FALSE, message = FALSE, fig.wide = TRUE, fig.height = 6, fig.cap = "t-SNE. Cells are colored by cluster ID (a) and group ID (b), respectively."}
 # aesthetics for plotting
 .prettify <- list(
     labs(x = "t-SNE dim. 1", y = "t-SNE dim. 2"),
-    guides(fill = guide_legend(ncol = 2, override.aes = list(size = 3, alpha = 1))),
-    theme_void(), theme(aspect.ratio = 1, legend.position = "bottom"))
+    guides(fill = guide_legend(ncol = 2, 
+        override.aes = list(size = 5, alpha = 1))),
+    theme_void(), theme(aspect.ratio = 1, 
+        legend.position = "bottom", 
+        axis.title = element_text()))
 
 # t-SNE colored by cluster ID
 tsne_kid <- plotTSNE(sce, colour_by = "cluster_id", 
-    point_size = 0.8, point_alpha = 0.4) + .prettify
+    point_size = 0.8, point_alpha = 0.4) + .prettify +
+    theme(axis.title.y = element_text(angle = 90))
 
 # t-SNE colored by group ID
 tsne_gid <- plotTSNE(sce, colour_by = "group_id", 
-    point_size = 0.8, point_alpha = 0.4) + .prettify
+    point_size = 0.8, point_alpha = 0.4) + .prettify +
+    scale_fill_manual(values = hue_pal()(2)) +
+    theme(axis.title.y = element_text(color = "white"))
 
+# arrange side-by-side
 plot_grid(
     plot_grid(
         tsne_kid + theme(legend.position = "none"), 
-        tsne_gid + theme(legend.position = "none")),
+        tsne_gid + theme(legend.position = "none"),
+        labels = "auto"),
     plot_grid(
         get_legend(tsne_kid), 
         get_legend(tsne_gid)),
@@ -281,16 +382,17 @@ plot_grid(
 
 ## Cell-level visualization {.tabset}
 
-The `r Biocpkg("scater")` [@McCarthy2017-scater] package provides a variety of visualizations for single-cell data. Here, we use `plotExpression` to plot violin plots of the top differential genes identified for each cluster. We specify `x = "sample_id"` to obtain one violin per sample, and `colour_by = "group_id"` to highlight the experimental condition each sample belongs to. 
+For changes of high interest, we can view the cell-level expressions of specific genes in a specific cluster and across samples. The top-hits for each cluster can be pulled as follows:
 
 ```{r warning = FALSE}
-# compute log-normalized counts
-sce <- normalize(sce)
-
 # pull top-n genes for ea. cluster
 top_n <- 9
 top_gs <- lapply(res, function(u) u$gene[seq_len(top_n)])
 ```
+
+We use `plotExpression` (`r Biocpkg("scater")` package) to generate violin plots for the top differential genes identified for each cluster. We specify `x = "sample_id"` to obtain one violin per sample, and `colour_by = "group_id"` to highlight the experimental condition each sample belongs to.
+
+Note that, as we are testing for DE on the cluster-level, for plotting, we need to subset the cells that have been assigned to a given cluster `k`. To do this, we can reuse `cs_by_ks` (containing cells split by cluster-sample) in conjunction with `unlist`.
 
 ```{r eval = FALSE}
 lapply(kids, function(k) {
@@ -319,9 +421,11 @@ for (k in kids) {
 
 ## Sample-level visualization {.tabset}
 
-Analogous to the computation of pseudobulk-counts in section \@ref(sec-agg), we can obtain cluster-sample expression means by replacing `rowSums` with `rowMeans` and `counts` with `logcounts` in the code snipped above: 
+Especially when wanting to gain an overview of numerous DE testing results for many clusters, both dimension reduction and cell-level visualisations require a lot of space and can become cumbersome to interpret. In this setting, it is thus recommendable to visualise aggregated measurements, e.g., mean expression values by cluster and sample. 
 
-```{r ms}
+We can assemble cluster-sample expression-means by replacing `rowSums` with `rowMeans` and `counts` with `logcounts` in the code snipped used to compute pseudobulk-counts in section \@ref(agg):
+
+```{r pb-means}
 # calculate expression-means by cluster-sample
 ms <- map_depth(cs_by_ks, 2, function(i) 
     rowMeans(logcounts(sce[, i]))) %>% 
@@ -329,7 +433,7 @@ ms <- map_depth(cs_by_ks, 2, function(i)
     SingleCellExperiment(assays = list(.))
 ```
 
-To better highlight relative differences across conditions, we apply a z-normalization to normalize expression values to mean 0 and standard deviation 1:
+To better highlight relative differences across conditions, we construct the helper-function `.z_norm` that applies a z-normalization to normalize expression values to mean 0 and standard deviation 1:
 
 ```{r}
 .z_norm <- function(x, th = 2.5) {
@@ -344,7 +448,7 @@ To better highlight relative differences across conditions, we apply a z-normali
 }
 ```
 
-We further construct a wrapper `.plot_diff_hm` that takes as input a SCE of pseudobulk mean-logcounts, a cluster ID `k`, and a character string of genes `gs`. `.plot_diff_hm` will render a heatmap of z-normalized mean expressions across samples such that rows = genes, columns = samples, and columns are annotated with group IDs:
+We further construct the wrapper `.plot_diff_hm` that takes as input a SCE of pseudobulk mean-logcounts, a cluster ID `k`, a character string of genes `gs`, and an experimental design table `ei`:
 
 ```{r}
 .plot_diff_hm <- function(ms, k, gs, ei) {
@@ -369,10 +473,12 @@ We further construct a wrapper `.plot_diff_hm` that takes as input a SCE of pseu
 }
 ```
 
+`.plot_diff_hm` will render a heatmap of z-normalized mean expressions (for a given cluster) across samples such that rows = genes, columns = samples, and columns are annotated with group IDs. Where, we visualize the top-20 differential findings in each cluster: 
+
 ```{r eval = FALSE}
 lapply(kids, function(k) {
-    top20 <- res[[k]]$gene[seq_len(20)]
-    .plot_diff_hm(ms, k, top20, ei)
+    top20 <- res[[k]]$gene[seq_len(20)] # subset top-20 hits for cluster k
+    .plot_diff_hm(ms, k, top20, ei)     # render differential heatmap
 })
 ```
 
@@ -383,6 +489,64 @@ for (k in kids) {
     print(.plot_diff_hm(ms, k, top20, ei))
     cat("\n\n")
 }
+```
+
+# DA analysis
+
+Differential abundance (DA) analysis compares the proportions of cell types across experimental conditions and aims to highlight populations that are present at different ratios. Even though DA analysis lies beyond the scope of this workflow, we present it here for completeness.
+
+In preparation for DA analysis, we first calculate two tables that contain cell counts for each sample and population (`n_cells`) and the corresponding proportions of cell types by sample (`freqs`)[^3]:
+
+[^3]: We will use proportions only for plotting; statistical modeling takes cluster-sample cell counts as input; see section \@ref(DA).
+
+```{r}
+# calculate cluster-sample cell counts
+n_cells <- table(sce$cluster_id, sce$sample_id)
+
+# calculate cluster proportions across samples
+freqs <- prop.table(n_cells, margin = 1)
+```
+
+## Visualization
+
+For visual inspection, we generate a barplot of cell type compositions for each sample; see Fig. \@ref(fig:da-barplot). As alternative represenation, we further render a boxplot where each panel compares the distribution of a given subpopulation's frequencies between groups; see Fig. \@ref(fig:da-boxplot). 
+
+```{r}
+# prep. data.frame for plotting
+df <- data.frame(
+    frequency = as.numeric(freqs), 
+    cluster_id = rep(kids, ns),
+    sample_id = rep(sids, each = nk))
+m <- match(df$sample_id, ei$sample_id)
+df$group_id <- ei$group_id[m]
+```
+
+```{r da-barplot, fig.cap = "Barplot of subpopulation frequencies; stratified by group ID."}
+# barplot of relative cluster-abundances
+ggplot(df, aes(x = sample_id, y = frequency, fill = cluster_id)) +
+    geom_bar(stat = "identity", position = "fill") + 
+    facet_wrap(~ group_id, scales = "free_x") +
+    theme_classic()  + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r da-boxplot, fig.cap = "Boxplot of subpopulation frequencies; stratified by cluster ID."}
+# boxplot of relative cluster-abundances
+ggplot(df, aes(x = group_id, y = frequency, color = group_id)) +
+    geom_boxplot(outlier.colour = NA) +  geom_jitter() +
+    facet_wrap(~ cluster_id, scales = "free_y", ncol = 4) +
+    theme_classic()
+```
+
+## Testing for DA {#DA}
+
+For differential testing, we reuse the design and contrast matrix from section \@ref(DS). In agreement with the results reported by @Kang2018-demuxlet, we find that INF-$\beta$ treatment does not significantly affect cell type proportions between control and stimulated cells, with the most prominent increase being in the frequency of "Dendritic cells" (logFC $\approx 0.71$): 
+
+```{r}
+y <- DGEList(counts = n_cells)
+y <- estimateDisp(y, design, trend.method = "none")
+fit <- glmFit(y, design)
+fit <- glmLRT(fit, contrast = contrast)
+topTags(fit, n = Inf)$table %>% round(2)
 ```
 
 # References
