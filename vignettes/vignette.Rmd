@@ -19,7 +19,6 @@ author:
   - *SIB
 abstract: >
   text
-package: "`r BiocStyle::pkg_ver('muscWorkshop')`"
 date: "Last modified: `r format(Sys.Date(), '%B %d, %Y')`"
 output: 
   BiocStyle::html_document:
@@ -156,14 +155,12 @@ sce[rowSums(counts(sce) > 0) > 0, ]
 dim(sce)
 ```
 
-We use `calculateQCMetrics` to compute various quality control metrics for each cell and gene, stored in the `colData` and `rowData`, respectively. 
+We use `calculateQCMetrics` to compute various quality control metrics for each cell and gene, stored in the `colData` and `rowData`, respectively.
 
 ```{r qc}
 # calculate quality control (QC) metrics
-sce <- calculateQCMetrics(sce)
-```
+sce <- calculateQCMetrics (sce)
 
-```{r}
 # get cells w/ few/many detected genes
 sce$is_outlier <- isOutlier(
     metric = sce$total_features_by_counts,
@@ -179,7 +176,7 @@ dim(sce)
 ```
 
 We use `normalize` to calculate log$_2$-transformed normalized expression values by dividing each count by its size factor, adding a pseudo-count of 1, and log-transforming[^1].  
-Alternatively, expression values could be obtained via `vst` (variance stabilizing transformation) from the `r CRANpkg("sctransform")` packages [@Hafemeister2019-vst], which returns Pearson residuals from a regularized negative binomial regression model that can be interpreted as normalized expression values.  
+Alternatively, expression values could be obtained via `vst` (variance stabilizing transformation) from the `r CRANpkg("sctransform")` packages [@Hafemeister2019-vst], which returns Pearson residuals from a regularized negative binomial regression model that can be interpreted as normalized expression values.
 
 [^1]: Note that, in this workflow, expression values are used for visualization only, and that differential analysis is performed on cluster-sample-level aggregates; see section \@ref(agg).
 
