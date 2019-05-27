@@ -33,6 +33,6 @@ Suggests:
 	knitr,
 	rmarkdown
 VignetteBuilder: knitr
-License: file LICENSE
+License: Artistic-2.0
 Encoding: UTF-8
 URL: https://github.com/HelenaLC/BioC2019-workshop_multi-scRNA-seq
