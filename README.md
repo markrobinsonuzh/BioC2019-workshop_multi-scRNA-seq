@@ -32,7 +32,7 @@ Wagner et al. (2016): Revealing the vectors of cellular identity with single-cel
 
 ### Workshop participation
 
-This will be a hands-on workshop in which attendees will alternately be introduced to each step of the workflow, and apply this knowledge to analyze a published biological dataset. Participants will be guided by a workflow-sceleton, which will prompt them to complete specific assigments. Live-coding will be used to accompany more complex tasks, as well as to present alternative approaches.
+This will be a hands-on workshop in which attendees will alternately be introduced to each step of the workflow, and apply this knowledge to analyze a published biological dataset. Participants will be guided by a workflow-skeleton, which will prompt them to complete specific assigments. Live-coding will be used to accompany more complex tasks, as well as to present alternative approaches.
 
 ### _R_ / _Bioconductor_ packages used
 
